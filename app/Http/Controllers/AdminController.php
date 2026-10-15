@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use Illuminate\Http\Request;
 use App\Models\Product;
+use Illuminate\Support\Facades\Auth;
 
 class AdminController extends Controller
 {
@@ -11,7 +12,7 @@ class AdminController extends Controller
     public function index(Request $request)
     {
         // Проверяем: авторизован ли пользователь вообще И равна ли его роль 2
-        if (\Auth::check() && \Auth::user()->id_role == 2) {
+        if (Auth::check() && Auth::user()->id_role == 2) {
 
             $items = Product::all();
             $editItem = null;
@@ -33,29 +34,78 @@ class AdminController extends Controller
     // Сохранение нового товара
     public function store(Request $request)
     {
+        // Валидация входных данных, поле 'img' проверяется как файл изображения
         $request->validate([
-            'name' => 'required|string', 'cost' => 'required|integer|min:0', 'country' => 'required|string',
-            'year' => 'required|integer', 'model' => 'required|string', 'img' => 'required|string',
-            'id_category' => 'required|integer', 'count' => 'required|integer|min:0',
+            'name'        => 'required|string',
+            'cost'        => 'required|integer|min:0',
+            'country'     => 'required|string',
+            'year'        => 'required|integer',
+            'model'       => 'required|string',
+            'img'         => 'required|image|mimes:jpeg,png,jpg,gif|max:2048',
+            'id_category' => 'required|integer',
+            'count'       => 'required|integer|min:0',
         ]);
 
-        Product::create($request->all());
+        // Берём только текстовые поля, файл сюда не попадает
+        $data = $request->only([
+            'name', 'model', 'cost', 'count',
+            'id_category', 'country', 'year',
+        ]);
+
+        // Сохраняем файл в public/images и записываем в БД только имя
+        if ($request->hasFile('img')) {
+            $file = $request->file('img');
+
+            // basename() защищает от путей в оригинальном имени файла
+            $filename = time() . '_' . basename($file->getClientOriginalName());
+
+            $file->move(public_path('images'), $filename);
+
+            $data['img'] = $filename;
+        }
+
+        Product::create($data);
+
         return redirect()->route('admin')->with('status', 'Новый товар успешно добавлен в базу данных!');
     }
 
     // Обработка обновления товара
     public function update(Request $request, $id_product)
     {
+        // При обновлении картинка может быть необязательной (nullable)
         $request->validate([
-            'name' => 'required|string', 'cost' => 'required|integer|min:0', 'country' => 'required|string',
-            'year' => 'required|integer', 'model' => 'required|string', 'img' => 'required|string',
-            'id_category' => 'required|integer', 'count' => 'required|integer|min:0',
+            'name'        => 'required|string',
+            'cost'        => 'required|integer|min:0',
+            'country'     => 'required|string',
+            'year'        => 'required|integer',
+            'model'       => 'required|string',
+            'img'         => 'nullable|image|mimes:jpeg,png,jpg,gif|max:2048',
+            'id_category' => 'required|integer',
+            'count'       => 'required|integer|min:0',
         ]);
 
         $item = Product::findOrFail($id_product);
-        $item->update($request->all());
 
-        // После обновления сбрасываем GET-параметр и возвращаем чистую админку
+        // Только текстовые поля
+        $data = $request->only([
+            'name', 'model', 'cost', 'count',
+            'id_category', 'country', 'year',
+        ]);
+
+        // Если загрузили новое фото — сохраняем его и обновляем имя в БД
+        if ($request->hasFile('img')) {
+            $file = $request->file('img');
+
+            $filename = time() . '_' . basename($file->getClientOriginalName());
+
+            $file->move(public_path('images'), $filename);
+
+            $data['img'] = $filename;
+        }
+        // Если файла нет — поле img вообще не трогаем, старое имя останется в БД
+
+        $item->update($data);
+
         return redirect()->route('admin')->with('status', 'Данные товара успешно обновлены!');
     }
 
@@ -64,6 +114,7 @@ class AdminController extends Controller
     {
         $item = Product::findOrFail($id_product);
         $item->delete();
+
         return redirect()->route('admin')->with('status', 'Товар удален из каталога.');
     }
 }
